@@ -9,14 +9,17 @@ namespace ClimateMonitor.Api.Controllers;
 public class ReadingsController : ControllerBase
 {
     private readonly DeviceSecretValidatorService _secretValidator;
+    private readonly VersionSemanticsValidatorService _versionSemanticsValidator;
     private readonly AlertService _alertService;
 
     public ReadingsController(
-        DeviceSecretValidatorService secretValidator, 
-        AlertService alertService)
+        DeviceSecretValidatorService secretValidator,
+        AlertService alertService,
+        VersionSemanticsValidatorService versionSemanticsValidator)
     {
         _secretValidator = secretValidator;
         _alertService = alertService;
+        _versionSemanticsValidator = versionSemanticsValidator;
     }
 
     /// <summary>
@@ -33,7 +36,7 @@ public class ReadingsController : ControllerBase
     /// <param name="deviceSecret">A unique identifier on the device included in the header(x-device-shared-secret).</param>
     /// <param name="deviceReadingRequest">Sensor information and extra metadata from device.</param>
     [HttpPost("evaluate")]
-    public ActionResult<IEnumerable<Alert>> EvaluateReading(
+    public ActionResult<IEnumerable<Alert>> EvaluateReading([FromHeader(Name = "x-device-shared-secret")]
         string deviceSecret,
         [FromBody] DeviceReadingRequest deviceReadingRequest)
     {
@@ -42,6 +45,17 @@ public class ReadingsController : ControllerBase
             return Problem(
                 detail: "Device secret is not within the valid range.",
                 statusCode: StatusCodes.Status401Unauthorized);
+        }
+
+        if (!_versionSemanticsValidator.ValidateVersionSemantics(deviceReadingRequest.FirmwareVersion))
+        {
+            var modelErrors = new Microsoft.AspNetCore.Mvc.ModelBinding.ModelStateDictionary();
+            modelErrors.AddModelError("FirmwareVersion", "The firmware value does not match semantic versioning format.");
+
+            return ValidationProblem(
+                detail: "The firmware value does not match semantic versioning format.",
+                statusCode: StatusCodes.Status400BadRequest, 
+                modelStateDictionary: modelErrors);
         }
 
         return Ok(_alertService.GetAlerts(deviceReadingRequest));
